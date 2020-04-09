@@ -61,6 +61,15 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	if err != nil {
 		return err
 	}
+	
+	// 观察 service，处理动作定义在 reconciler 里面。
+	err = c.Watch(&source.Kind{Type: &corev1.Service{}}, &handler.EnqueueRequestForOwner{
+		IsController: true,
+		OwnerType:    &appv1.AppService{},
+	})
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -136,6 +145,29 @@ func (r *ReconcileAppService) Reconcile(request reconcile.Request) (reconcile.Re
 		return reconcile.Result{}, nil
 	}
 
+	
+// 创建 service
+	service := &corev1.Service{}
+	if err := r.client.Get(context.TODO(), request.NamespacedName, service); err != nil && errors.IsNotFound(err) {
+		service := resources.NewService(instance)
+		if err := r.client.Create(context.TODO(), service); err != nil {
+			return reconcile.Result{}, err
+		}
+		// 3. 关联 Annotations
+		data, _ := json.Marshal(instance.Spec)
+		if instance.Annotations != nil {
+			instance.Annotations["spec"] = string(data)
+		} else {
+			instance.Annotations = map[string]string{"spec": string(data)}
+		}
+
+		if err := r.client.Update(context.TODO(), instance); err != nil {
+			return reconcile.Result{}, nil
+		}
+		return reconcile.Result{}, nil
+	}
+	
+	
 	oldspec := appv1.AppServiceSpec{}
 	if err := json.Unmarshal([]byte(instance.Annotations["spec"]), oldspec); err != nil {
 		return reconcile.Result{}, err
